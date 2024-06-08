@@ -6,7 +6,6 @@ import {Page, PredefinedNetworkConditions} from 'puppeteer';
 
 const lighthouse = require('lighthouse/core/index.cjs');
 
-
 const slow3G = PredefinedNetworkConditions['Slow 3G'];
 const fast3G = PredefinedNetworkConditions['Fast 3G'];
 
@@ -26,10 +25,9 @@ const simulateNetworkConditions = async (page: Page, condition: NetworkCondition
 
 const extractLighthouseMetrics = (lhr: any) => {
     return {
-        "metrics": lhr.audits['metrics'],
-        "resource-summary": lhr.audits['resource-summary']
+        metrics: lhr.audits['metrics']?.details.items[0],
+        resourceSummary: lhr.audits['resource-summary']?.details.items
     };
-
 };
 
 const performTest = async (conditionName: NetworkConditionKey, appType: string, appUrl: string) => {
@@ -38,7 +36,12 @@ const performTest = async (conditionName: NetworkConditionKey, appType: string, 
     const client = await page.target().createCDPSession();
 
     // Increase the default navigation timeout
-    page.setDefaultNavigationTimeout(1200000);
+    const timeout = conditionName !== 'noThrottling' ? 300000 : 120000; // 5 minutes for throttled, 2 minutes for normal
+    page.setDefaultNavigationTimeout(timeout);
+
+    // Set a consistent viewport size and disable mobile emulation
+    await page.setViewport({width: 1920, height: 1080, isMobile: false});
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
 
     // Load environment variables
     const loginUrl = `${appUrl}login` ?? '';
@@ -51,20 +54,24 @@ const performTest = async (conditionName: NetworkConditionKey, appType: string, 
     try {
         // Apply network conditions
         await client.send('Network.enable');
-        // Simulated network throttling
+        await client.send('DOM.enable');
         await simulateNetworkConditions(page, conditionName);
 
         // Start performance analysis
         await client.send('Performance.enable');
 
         // Navigate to login page
-        await page.goto(loginUrl, {waitUntil: 'networkidle2'});
+        await page.goto(loginUrl, {waitUntil: 'load'});
 
-        const puppeter_metrics = await page.metrics();
-
-        // Gather initial performance metrics
+        const puppeteerMetrics = await page.metrics();
         const initialPerformanceTiming = await performanceTimingMetrics(page);
         const processedBrowserMetrics = processPerformanceTiming(initialPerformanceTiming);
+
+        // Log detailed performance timing
+        console.log('Performance timing metrics:', processedBrowserMetrics);
+
+        // Measure form submission time
+        const formStart = Date.now();
 
         // Perform login
         await page.type('#email-input', username);
@@ -73,10 +80,13 @@ const performTest = async (conditionName: NetworkConditionKey, appType: string, 
 
         // Wait for navigation after login
         try {
-            await page.waitForNavigation({waitUntil: 'networkidle2', timeout: 1200000});
+            await page.waitForNavigation({waitUntil: 'load', timeout});
         } catch (error) {
             console.error('Navigation to home page after login failed:', error);
         }
+
+        const formEnd = Date.now();
+        const formSubmissionTime = formEnd - formStart;
 
         // Verify login by checking the URL or a specific element on the home page
         let loginSuccessful = false;
@@ -88,20 +98,14 @@ const performTest = async (conditionName: NetworkConditionKey, appType: string, 
             console.log('Login failed');
         }
 
-        // Collect Lighthouse metrics
-        const wsEndpoint = new URL(browser.wsEndpoint());
-        const port = parseInt(wsEndpoint.port, 10);
-        const {lhr} = await lighthouse(page.url(), {port}, null);
-        const lighthouseMetrics = extractLighthouseMetrics(lhr);
-
         // Save metrics to a file
         const metrics = {
             browserPerformanceTiming: processedBrowserMetrics,
-            puppeterMetrics: puppeter_metrics,
-            lighthouseMetrics: lighthouseMetrics,
+            puppeteerMetrics,
+            formSubmissionTime, // Added form submission time
             loginSuccessful
         };
-        const metricsFilePath = path.resolve(__dirname, `../../../results/login/metrics/${appType}-${conditionName}-metrics.json`);
+        const metricsFilePath = path.resolve(__dirname, `../../../results/login/metrics/custom/${appType}-${conditionName}-metrics.json`);
         fs.writeFileSync(metricsFilePath, JSON.stringify(metrics, null, 2));
         console.log(`Metrics saved for ${conditionName}: ${metricsFilePath}`);
 
@@ -112,22 +116,68 @@ const performTest = async (conditionName: NetworkConditionKey, appType: string, 
     await browser.close();
 };
 
+const collectLighthouseMetrics = async (appType: string, appUrl: string) => {
+    const browser = await launchBrowser();
+    const page = await browser.newPage();
+
+    // Increase the default navigation timeout
+    page.setDefaultNavigationTimeout(1200000);
+
+    // Set a consistent viewport size and disable mobile emulation
+    await page.setViewport({width: 1920, height: 1080, isMobile: false});
+
+    // Navigate to the login page
+    const loginUrl = `${appUrl}login` ?? '';
+    await page.goto(loginUrl, {waitUntil: 'load'});
+
+    try {
+        // Collect Lighthouse metrics for login page with desktop configuration
+        const wsEndpoint = new URL(browser.wsEndpoint());
+        const port = parseInt(wsEndpoint.port, 10);
+        const options = {
+            port,
+            formFactor: 'desktop',
+            screenEmulation: {
+                mobile: false,
+                width: 1920,
+                height: 1080,
+                deviceScaleFactor: 1,
+                disabled: false
+            },
+
+        };
+        const {lhr} = await lighthouse(page.url(), options, null);
+        const lighthouseMetrics = extractLighthouseMetrics(lhr);
+
+        // Save Lighthouse metrics to a separate file
+        const lighthouseFilePath = path.resolve(__dirname, `../../../results/login/metrics/lighthouse/${appType}-lighthouse-metrics.json`);
+        fs.writeFileSync(lighthouseFilePath, JSON.stringify(lighthouseMetrics, null, 2));
+        console.log(`Lighthouse metrics saved for ${appType}: ${lighthouseFilePath}`);
+
+
+    } catch (error) {
+        console.error(`Error during Lighthouse metrics collection for appType ${appType}:`, error);
+    }
+
+    await browser.close();
+};
+
 // Perform login and collect metrics under different network conditions
 (async () => {
     const apps = [
         {
-            "url": process.env.ANGULAR_APP_URL,
-            "type": "angular"
+            url: process.env.ANGULAR_APP_URL,
+            type: "angular"
         },
         {
-            "url": process.env.VUE_APP_URL,
-            "type": "vue"
+            url: process.env.VUE_APP_URL,
+            type: "vue"
         },
         {
-            "url": process.env.REACT_APP_URL,
-            "type": "react"
+            url: process.env.REACT_APP_URL,
+            type: "react"
         }
-    ]
+    ];
 
     for (const app of apps) {
         for (const condition in networkConditions) {
@@ -135,5 +185,9 @@ const performTest = async (conditionName: NetworkConditionKey, appType: string, 
                 await performTest(condition as NetworkConditionKey, app.type, app.url);
             }
         }
+
+        if (app.url)
+            await collectLighthouseMetrics(app.type, app.url);
+
     }
 })();
