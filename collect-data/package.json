@@ -3,9 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "scripts": {
-    "test:vue:login": "ts-node ./scripts/login/login.ts vue",
-    "test:angular:login": "ts-node ./scripts/login/login.ts angular",
-    "test:react:login": "ts-node ./scripts/login/login.ts react"
+    "test:login": "ts-node ./scripts/login/login.ts"
   },
   "keywords": [],
   "author": "",
