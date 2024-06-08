@@ -39,6 +39,41 @@ def collect_custom_metrics(apps, conditions):
                 'JSHeapUsedSize': puppeteer_metrics.get('JSHeapUsedSize', 0),
                 'JSHeapTotalSize': puppeteer_metrics.get('JSHeapTotalSize', 0)
             })
+
+    return pd.DataFrame(data_custom)
+
+
+# Data collection for custom metrics
+def collect_custom_cpu_metrics(apps, cpu_conditions):
+    data_custom = []
+    for app in apps:
+        for cpu in cpu_conditions:
+            if cpu == 'noThrottling':
+                file_path = f'../../results/login/metrics/custom/{app}-noThrottling-metrics.json'
+            else:
+                file_path = f'../../results/login/metrics/custom/{app}-{cpu}-metrics.json'
+            result = load_results(file_path)
+            metrics = result['browserPerformanceTiming']
+            puppeteer_metrics = result['puppeteerMetrics']
+
+            data_custom.append({
+                'App': app,
+                'Condition': cpu,
+                'Page Load Time': metrics.get('domComplete', 0),
+                'Form Submission Time': result.get('formSubmissionTime', None),
+                'Documents': puppeteer_metrics.get('Documents', 0),
+                'Frames': puppeteer_metrics.get('Frames', 0),
+                'JSEventListeners': puppeteer_metrics.get('JSEventListeners', 0),
+                'Nodes': puppeteer_metrics.get('Nodes', 0),
+                'LayoutCount': puppeteer_metrics.get('LayoutCount', 0),
+                'RecalcStyleCount': puppeteer_metrics.get('RecalcStyleCount', 0),
+                'LayoutDuration': puppeteer_metrics.get('LayoutDuration', 0),
+                'RecalcStyleDuration': puppeteer_metrics.get('RecalcStyleDuration', 0),
+                'ScriptDuration': puppeteer_metrics.get('ScriptDuration', 0),
+                'TaskDuration': puppeteer_metrics.get('TaskDuration', 0),
+                'JSHeapUsedSize': puppeteer_metrics.get('JSHeapUsedSize', 0),
+                'JSHeapTotalSize': puppeteer_metrics.get('JSHeapTotalSize', 0)
+            })
     return pd.DataFrame(data_custom)
 
 
@@ -66,14 +101,14 @@ def collect_lighthouse_metrics(apps):
 
 
 # Plotting function with exact values on bars
-def plot_metric_comparison(df, metric, title, ylabel, lower_is_better=True):
+def plot_metric_comparison(df, metric, title, ylabel, lower_is_better=True, legend_title='Network Condition'):
     plt.figure(figsize=(12, 6))
     ax = sns.barplot(data=df, x='App', y=metric, hue='Condition', errorbar=None)
     comparison_note = " (Lower is Better)" if lower_is_better else " (Higher is Better)"
     plt.title(f"{title}{comparison_note}")
     plt.ylabel(ylabel)
     plt.xlabel('App')
-    plt.legend(title='Network Condition')
+    plt.legend(title=legend_title)
 
     # Adding exact values on bars
     for p in ax.patches:
@@ -112,17 +147,23 @@ def plot_trend(df, metric, title, ylabel, lower_is_better=True):
 
 
 # Plotting custom metrics
-def plot_custom_metrics(df_custom):
-    plot_metric_comparison(df_custom, 'Page Load Time', 'Page Load Time Comparison', 'Time (ms)')
-    plot_metric_comparison(df_custom, 'Form Submission Time', 'Form Submission Time Comparison', 'Time (ms)')
-    plot_metric_comparison(df_custom, 'LayoutDuration', 'Layout Duration Comparison', 'Time (ms)')
-    plot_metric_comparison(df_custom, 'RecalcStyleDuration', 'Recalc Style Duration Comparison', 'Time (ms)')
-    plot_metric_comparison(df_custom, 'ScriptDuration', 'Script Duration Comparison', 'Time (ms)')
-    plot_metric_comparison(df_custom, 'TaskDuration', 'Task Duration Comparison', 'Time (ms)')
+def plot_custom_metrics(df_custom, legend_title='Network Condition'):
+    plot_metric_comparison(df_custom, 'Page Load Time', 'Page Load Time Comparison', 'Time (ms)',
+                           legend_title=legend_title)
+    plot_metric_comparison(df_custom, 'Form Submission Time', 'Form Submission Time Comparison', 'Time (ms)',
+                           legend_title=legend_title)
+    plot_metric_comparison(df_custom, 'LayoutDuration', 'Layout Duration Comparison', 'Time (ms)',
+                           legend_title=legend_title)
+    plot_metric_comparison(df_custom, 'RecalcStyleDuration', 'Recalc Style Duration Comparison', 'Time (ms)',
+                           legend_title=legend_title)
+    plot_metric_comparison(df_custom, 'ScriptDuration', 'Script Duration Comparison', 'Time (ms)',
+                           legend_title=legend_title)
+    plot_metric_comparison(df_custom, 'TaskDuration', 'Task Duration Comparison', 'Time (ms)',
+                           legend_title=legend_title)
     plot_metric_comparison(df_custom, 'JSHeapUsedSize', 'JS Heap Used Size Comparison', 'Size (bytes)',
-                           lower_is_better=False)
+                           lower_is_better=False, legend_title=legend_title)
     plot_metric_comparison(df_custom, 'JSHeapTotalSize', 'JS Heap Total Size Comparison', 'Size (bytes)',
-                           lower_is_better=False)
+                           lower_is_better=False, legend_title=legend_title)
 
     plot_trend(df_custom, 'Page Load Time', 'Page Load Time', 'Time (ms)')
     plot_trend(df_custom, 'Form Submission Time', 'Form Submission Time', 'Time (ms)')
@@ -171,11 +212,14 @@ def plot_lighthouse_metrics(df_lighthouse):
 def main():
     apps = ['angular', 'vue', 'react']
     conditions = ['noThrottling', 'fast3G', 'slow3G']
+    cpu_conditions = ['noThrottling', 'medium-cpu', 'slow-cpu']
 
     df_custom = collect_custom_metrics(apps, conditions)
+    df_cpu_custom = collect_custom_cpu_metrics(apps, cpu_conditions)
     df_lighthouse = collect_lighthouse_metrics(apps)
 
     plot_custom_metrics(df_custom)
+    plot_custom_metrics(df_cpu_custom, 'CPU throttling conditions')
     plot_lighthouse_metrics(df_lighthouse)
 
 
