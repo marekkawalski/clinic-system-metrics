@@ -155,12 +155,12 @@ def main():
         'Łączna liczba żądań': {
             'title': 'Porównanie łącznej liczby żądań',
             'ylabel': 'Liczba',
-            'lower_is_better': False
+            'lower_is_better': True
         },
         'Łączny rozmiar transferu': {
             'title': 'Porównanie łącznego rozmiaru transferu',
             'ylabel': 'Rozmiar (bajty)',
-            'lower_is_better': False
+            'lower_is_better': True
         },
         'Przesunięcie układu (CLS)': {
             'title': 'Porównanie przesunięcia układu (CLS)',
@@ -169,12 +169,12 @@ def main():
         'Wykorzystany rozmiar sterty JS': {
             'title': 'Porównanie wykorzystania sterty JS',
             'ylabel': 'Rozmiar (bajty)',
-            'lower_is_better': False
+            'lower_is_better': True
         },
         'Całkowity rozmiar sterty JS': {
             'title': 'Porównanie całkowitego rozmiaru sterty JS',
             'ylabel': 'Rozmiar (bajty)',
-            'lower_is_better': False
+            'lower_is_better': True
         }
     }
 
