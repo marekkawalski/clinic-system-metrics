@@ -20,15 +20,14 @@ const cpuSlowdowns = {
 type CPUConditionKey = keyof typeof cpuSlowdowns;
 
 const networkConditions = {
-    noThrottling: 'noThrottling',
     fast3G,
     slow3G
 };
 
 type NetworkConditionKey = keyof typeof networkConditions;
 
-const simulateNetworkConditions = async (page: Page, condition: NetworkConditionKey) => {
-    if (condition !== 'noThrottling' && networkConditions[condition]) {
+const simulateNetworkConditions = async (page: Page, condition?: NetworkConditionKey) => {
+    if (condition && networkConditions[condition]) {
         await page.emulateNetworkConditions(networkConditions[condition]);
     }
 };
@@ -40,13 +39,13 @@ const extractLighthouseMetrics = (lhr: any) => {
     };
 };
 
-const performTest = async (conditionName: NetworkConditionKey, appType: string, appUrl: string, cpuSlowdown?: CPUConditionKey) => {
+const performTest = async (appType: string, appUrl: string, conditionName?: NetworkConditionKey, cpuSlowdown?: CPUConditionKey) => {
     const browser = await launchBrowser();
     const page = await browser.newPage();
     const client = await page.target().createCDPSession();
 
     // Increase the default navigation timeout
-    const timeout = conditionName !== 'noThrottling' ? 300000 : 120000; // 5 minutes for throttled, 2 minutes for normal
+    const timeout = conditionName ? 300000 : 120000; // 5 minutes for throttled, 2 minutes for normal
     page.setDefaultNavigationTimeout(timeout);
 
     // Set a consistent viewport size and disable mobile emulation
@@ -67,8 +66,9 @@ const performTest = async (conditionName: NetworkConditionKey, appType: string, 
         await client.send('DOM.enable');
         await simulateNetworkConditions(page, conditionName);
 
-        if (cpuSlowdown)
+        if (cpuSlowdown) {
             await page.emulateCPUThrottling(cpuSlowdowns[cpuSlowdown]);
+        }
 
         // Start performance analysis
         await client.send('Performance.enable');
@@ -120,11 +120,10 @@ const performTest = async (conditionName: NetworkConditionKey, appType: string, 
         };
 
         // Save metrics to a file
-        const conditionLabel = cpuSlowdown ? `${cpuSlowdown}-cpu` : conditionName.replace(/_/g, '-').toLowerCase();
+        const conditionLabel = cpuSlowdown ? `${cpuSlowdown}-cpu` : (conditionName ? conditionName.replace(/_/g, '-').toLowerCase() : 'no-throttling');
         const metricsFilePath = path.resolve(__dirname, `../../../results/login/metrics/custom/${appType}_${conditionLabel}_metrics.json`);
         fs.writeFileSync(metricsFilePath, JSON.stringify(metrics, null, 2));
         console.log(`Metrics saved for ${conditionLabel}: ${metricsFilePath}`);
-
 
     } catch (error) {
         console.error(`Error during metrics collection for condition ${conditionName}:`, error);
@@ -133,7 +132,7 @@ const performTest = async (conditionName: NetworkConditionKey, appType: string, 
     await browser.close();
 };
 
-const collectLighthouseMetrics = async (appType: string, appUrl: string, conditionName: NetworkConditionKey, cpuSlowdown?: CPUConditionKey) => {
+const collectLighthouseMetrics = async (appType: string, appUrl: string, conditionName?: NetworkConditionKey, cpuSlowdown?: CPUConditionKey) => {
     const browser = await launchBrowser();
     const page = await browser.newPage();
 
@@ -144,7 +143,7 @@ const collectLighthouseMetrics = async (appType: string, appUrl: string, conditi
     await page.setViewport({width: 1920, height: 1080, isMobile: false});
 
     // Apply network conditions if specified
-    if (conditionName !== 'noThrottling') {
+    if (conditionName) {
         await simulateNetworkConditions(page, conditionName);
     }
 
@@ -178,10 +177,10 @@ const collectLighthouseMetrics = async (appType: string, appUrl: string, conditi
         const lighthouseMetrics = extractLighthouseMetrics(lhr);
 
         // Generate a clearer file name
-        let conditionLabel = 'no-throttle';
+        let conditionLabel = 'no-throttling';
         if (cpuSlowdown) {
             conditionLabel = `${cpuSlowdown}-cpu`;
-        } else if (conditionName !== 'noThrottling') {
+        } else if (conditionName) {
             conditionLabel = conditionName.replace(/_/g, '-').toLowerCase();
         }
 
@@ -196,17 +195,10 @@ const collectLighthouseMetrics = async (appType: string, appUrl: string, conditi
     await browser.close();
 };
 
-const getThrottlingSettings = (conditionName: NetworkConditionKey, cpuSlowdown?: CPUConditionKey) => {
+const getThrottlingSettings = (conditionName?: NetworkConditionKey, cpuSlowdown?: CPUConditionKey) => {
     const cpuSlowdownMultiplier = cpuSlowdown ? cpuSlowdowns[cpuSlowdown] : 1;
 
     const networkSettings = {
-        noThrottling: {
-            rttMs: 0,
-            throughputKbps: 0,
-            requestLatencyMs: 0,
-            downloadThroughputKbps: 0,
-            uploadThroughputKbps: 0,
-        },
         fast3G: {
             rttMs: 150,
             throughputKbps: 1600,
@@ -220,17 +212,23 @@ const getThrottlingSettings = (conditionName: NetworkConditionKey, cpuSlowdown?:
             requestLatencyMs: 0,
             downloadThroughputKbps: 500,
             uploadThroughputKbps: 500,
+        },
+        noThrottling: {
+            rttMs: 0,
+            throughputKbps: 0,
+            requestLatencyMs: 0,
+            downloadThroughputKbps: 0,
+            uploadThroughputKbps: 0,
         }
     };
 
-    const networkThrottling = networkSettings[conditionName] || networkSettings.noThrottling;
+    const networkThrottling = conditionName ? networkSettings[conditionName] : networkSettings.noThrottling;
 
     return {
         cpuSlowdownMultiplier,
         ...networkThrottling,
     };
 };
-
 
 // Perform login and collect metrics under different network conditions
 (async () => {
@@ -253,21 +251,19 @@ const getThrottlingSettings = (conditionName: NetworkConditionKey, cpuSlowdown?:
         if (app.url) {
             // Network condition tests
             for (const condition in networkConditions) {
-                if (condition !== 'noThrottling') {
-                    await performTest(condition as NetworkConditionKey, app.type, app.url);
-                    await collectLighthouseMetrics(app.type, app.url, condition as NetworkConditionKey);
-                }
+                await performTest(app.type, app.url, condition as NetworkConditionKey);
+                await collectLighthouseMetrics(app.type, app.url, condition as NetworkConditionKey);
             }
 
             // CPU condition tests
             for (const cpuSlowdown in cpuSlowdowns) {
-                await performTest('noThrottling' as NetworkConditionKey, app.type, app.url, cpuSlowdown as CPUConditionKey);
-                await collectLighthouseMetrics(app.type, app.url, 'noThrottling' as NetworkConditionKey, cpuSlowdown as CPUConditionKey);
+                await performTest(app.type, app.url, undefined, cpuSlowdown as CPUConditionKey);
+                await collectLighthouseMetrics(app.type, app.url, undefined, cpuSlowdown as CPUConditionKey);
             }
 
             // No throttling test (only once)
-            await performTest('noThrottling' as NetworkConditionKey, app.type, app.url);
-            await collectLighthouseMetrics(app.type, app.url, 'noThrottling' as NetworkConditionKey);
+            await performTest(app.type, app.url);
+            await collectLighthouseMetrics(app.type, app.url);
         }
     }
 })();
