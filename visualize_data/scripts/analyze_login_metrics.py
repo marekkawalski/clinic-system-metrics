@@ -11,79 +11,33 @@ def load_results(file_path):
         return json.load(file)
 
 
-# Data collection for custom metrics
-def collect_custom_metrics(apps, conditions):
-    data_custom = []
+# Function to collect metrics from JSON files
+def collect_metrics(apps, conditions, metric_files, metrics_to_collect):
+    data = []
     for app in apps:
         for condition in conditions:
-            file_path = f'../../results/login/metrics/custom/{app}_{condition}_metrics.json'
+            file_path = metric_files.format(app, condition)
             result = load_results(file_path)
-            metrics = result['browserPerformanceTiming']
-
             translated_condition = translate_condition(condition)
 
-            data_custom.append({
+            metrics = {}
+            for metric, (metric_source, metric_key) in metrics_to_collect.items():
+                if isinstance(result.get(metric_source), list):
+                    metrics[metric] = sum(item.get(metric_key, 0) for item in result.get(metric_source, []))
+                else:
+                    if metric_key:  # if metric_key is provided
+                        metrics[metric] = result.get(metric_source, {}).get(metric_key, 0)
+                    else:  # if metric_key is not provided
+                        metrics[metric] = result.get(metric_source, 0)
+
+            metrics.update({
                 'Aplikacja': app,
                 'Warunek': translated_condition,
-                'Czas załadowania zawartości DOM': metrics.get('domContentLoaded', 0),
-                'Czas ukończenia załadowania DOM': metrics.get('domComplete', 0),
-                'Czas przesłania formularza': result.get('formSubmissionTime', None)
             })
 
-    return pd.DataFrame(data_custom)
+            data.append(metrics)
 
-
-# Data collection for Lighthouse metrics
-def collect_lighthouse_metrics(apps, conditions):
-    data_lighthouse = []
-    for app in apps:
-        for condition in conditions:
-            file_path = f'../../results/login/metrics/lighthouse/{app}_{condition}_lighthouse_metrics.json'
-            result = load_results(file_path)
-            metrics = result['metrics']
-
-            translated_condition = translate_condition(condition)
-
-            data_lighthouse.append({
-                'Aplikacja': app,
-                'Warunek': translated_condition,
-                'Czas renderowania największego fragmentu (LCP)': metrics.get('largestContentfulPaint', 0),
-                'Czas do interaktywności': metrics.get('interactive', 0),
-                'Całkowity czas blokowania': metrics.get('totalBlockingTime', 0),
-                'Czas załadowania pierwszego znaczącego elementu': metrics.get('firstMeaningfulPaint', 0),
-                'Potencjalne maksymalne FID': metrics.get('maxPotentialFID', 0),
-                'Czas do pierwszego bajtu': metrics.get('timeToFirstByte', 0)
-            })
-
-    return pd.DataFrame(data_lighthouse)
-
-
-# Data collection for overall Lighthouse metrics from no-throttling files
-def collect_overall_lighthouse_metrics(apps):
-    data_overall = []
-    for app in apps:
-        file_path = f'../../results/login/metrics/lighthouse/{app}_no-throttling_lighthouse_metrics.json'
-        result = load_results(file_path)
-        metrics = result['metrics']
-        resource_summary = result['resourceSummary']
-        total_requests = sum(item['requestCount'] for item in resource_summary)
-        total_transfer_size = sum(item['transferSize'] for item in resource_summary)
-        cumulative_layout_shift = metrics.get('cumulativeLayoutShift', 0)
-
-        puppeteer_file_path = f'../../results/login/metrics/custom/{app}_no-throttling_metrics.json'
-        puppeteer_result = load_results(puppeteer_file_path)
-        puppeteer_metrics = puppeteer_result['puppeteerMetrics']
-
-        data_overall.append({
-            'Aplikacja': app,
-            'Łączna liczba żądań': total_requests,
-            'Łączny rozmiar transferu': total_transfer_size,
-            'Przesunięcie układu (CLS)': cumulative_layout_shift,
-            'Wykorzystany rozmiar sterty JS': puppeteer_metrics.get('JSHeapUsedSize', 0),
-            'Całkowity rozmiar sterty JS': puppeteer_metrics.get('JSHeapTotalSize', 0)
-        })
-
-    return pd.DataFrame(data_overall)
+    return pd.DataFrame(data)
 
 
 # Plotting function with exact values on bars
@@ -111,85 +65,17 @@ def plot_metric_comparison(df, metric, title, ylabel, lower_is_better=True, lege
     plt.show()
 
 
-# Plotting Lighthouse metrics
-def plot_lighthouse_metrics(df_lighthouse):
-    def plot_lighthouse_metric_comparison(df, metric, title, ylabel, lower_is_better=True):
-        plt.figure(figsize=(12, 6))
-        ax = sns.barplot(data=df, x='Aplikacja', y=metric, hue='Warunek', errorbar=None)
-        comparison_note = " (Mniej znaczy lepiej)" if lower_is_better else " (Więcej znaczy lepiej)"
-        plt.title(f"{title}{comparison_note}")
-        plt.ylabel(ylabel)
-        plt.xlabel('Aplikacja')
-
-        # Adding exact values on bars
-        for p in ax.patches:
-            height = p.get_height()
-            if height < 1:  # For very small values, show more precision
-                ax.annotate(f'{height:.5f}', (p.get_x() + p.get_width() / 2., height),
-                            ha='center', va='center', fontsize=9, color='black', xytext=(0, 5),
-                            textcoords='offset points')
-            else:
-                ax.annotate(f'{height:.1f}', (p.get_x() + p.get_width() / 2., height),
-                            ha='center', va='center', fontsize=9, color='black', xytext=(0, 5),
-                            textcoords='offset points')
-
-        plt.show()
-
-    plot_lighthouse_metric_comparison(df_lighthouse, 'Czas renderowania największego fragmentu (LCP)',
-                                      'Porównanie czasu renderowania największego fragmentu (LCP)',
-                                      'Czas (ms)')
-    plot_lighthouse_metric_comparison(df_lighthouse, 'Czas załadowania pierwszego znaczącego elementu',
-                                      'Porównanie czasu załadowania pierwszego znaczącego elementu',
-                                      'Czas (ms)')
-    plot_lighthouse_metric_comparison(df_lighthouse, 'Czas do interaktywności', 'Porównanie czasu do interaktywności',
-                                      'Czas (ms)')
-    plot_lighthouse_metric_comparison(df_lighthouse, 'Całkowity czas blokowania',
-                                      'Porównanie całkowitego czasu blokowania',
-                                      'Czas (ms)')
-    plot_lighthouse_metric_comparison(df_lighthouse, 'Potencjalne maksymalne FID',
-                                      'Porównanie potencjalnego maksymalnego FID',
-                                      'Czas (ms)')
-    plot_lighthouse_metric_comparison(df_lighthouse, 'Czas do pierwszego bajtu',
-                                      'Porównanie czasu do pierwszego bajtu',
-                                      'Czas (ms)')
-
-
-# Plotting overall Lighthouse metrics
-def plot_overall_lighthouse_metrics(df_overall):
-    def plot_overall_metric_comparison(df, metric, title, ylabel, lower_is_better=True):
-        plt.figure(figsize=(12, 6))
-        ax = sns.barplot(data=df, x='Aplikacja', y=metric, errorbar=None)
-        comparison_note = " (Mniej znaczy lepiej)" if lower_is_better else " (Więcej znaczy lepiej)"
-        plt.title(f"{title}{comparison_note}")
-        plt.ylabel(ylabel)
-        plt.xlabel('Aplikacja')
-
-        # Adding exact values on bars
-        for p in ax.patches:
-            height = p.get_height()
-            if height < 1:  # For very small values, show more precision
-                ax.annotate(f'{height:.5f}', (p.get_x() + p.get_width() / 2., height),
-                            ha='center', va='center', fontsize=9, color='black', xytext=(0, 5),
-                            textcoords='offset points')
-            else:
-                ax.annotate(f'{height:.1f}', (p.get_x() + p.get_width() / 2., height),
-                            ha='center', va='center', fontsize=9, color='black', xytext=(0, 5),
-                            textcoords='offset points')
-
-        plt.show()
-
-    plot_overall_metric_comparison(df_overall, 'Łączna liczba żądań', 'Porównanie łącznej liczby żądań', 'Liczba',
-                                   lower_is_better=True)
-    plot_overall_metric_comparison(df_overall, 'Łączny rozmiar transferu', 'Porównanie łącznego rozmiaru transferu',
-                                   'Rozmiar (bajty)',
-                                   lower_is_better=True)
-    plot_overall_metric_comparison(df_overall, 'Przesunięcie układu (CLS)', 'Porównanie przesunięcia układu (CLS)',
-                                   'Wynik przesunięcia', lower_is_better=True)
-    plot_overall_metric_comparison(df_overall, 'Wykorzystany rozmiar sterty JS', 'Porównanie wykorzystania sterty JS',
-                                   'Rozmiar (bajty)', lower_is_better=True)
-    plot_overall_metric_comparison(df_overall, 'Całkowity rozmiar sterty JS',
-                                   'Porównanie całkowitego rozmiaru sterty JS',
-                                   'Rozmiar (bajty)', lower_is_better=True)
+# Function to plot multiple metrics
+def plot_metrics(df, metrics_to_plot):
+    for metric, details in metrics_to_plot.items():
+        plot_metric_comparison(
+            df,
+            metric,
+            details['title'],
+            details['ylabel'],
+            details.get('lower_is_better', True),
+            details.get('legend_title', 'Warunek')
+        )
 
 
 # Main function to execute the data collection and plotting
@@ -198,43 +84,143 @@ def main():
     conditions = ['fast3g', 'slow3g']
     cpu_conditions = ['medium-cpu', 'slow-cpu']
 
+    # Metrics to collect
+    custom_metrics_to_collect = {
+        'Czas załadowania zawartości DOM': ('browserPerformanceTiming', 'domContentLoaded'),
+        'Czas ukończenia załadowania DOM': ('browserPerformanceTiming', 'domComplete'),
+        'Czas przesłania formularza': ('formSubmissionTime', '')
+    }
+
+    lighthouse_metrics_to_collect = {
+        'Czas renderowania największego fragmentu (LCP)': ('metrics', 'largestContentfulPaint'),
+        'Czas do interaktywności': ('metrics', 'interactive'),
+        'Całkowity czas blokowania': ('metrics', 'totalBlockingTime'),
+        'Czas załadowania pierwszego znaczącego elementu': ('metrics', 'firstMeaningfulPaint'),
+        'Potencjalne maksymalne FID': ('metrics', 'maxPotentialFID'),
+        'Czas do pierwszego bajtu': ('metrics', 'timeToFirstByte')
+    }
+
+    overall_lighthouse_metrics_to_collect = {
+        'Łączna liczba żądań': ('resourceSummary', 'requestCount'),
+        'Łączny rozmiar transferu': ('resourceSummary', 'transferSize'),
+        'Przesunięcie układu (CLS)': ('metrics', 'cumulativeLayoutShift')
+    }
+
+    overall_puppeteer_metrics_to_collect = {
+        'Wykorzystany rozmiar sterty JS': ('puppeteerMetrics', 'JSHeapUsedSize'),
+        'Całkowity rozmiar sterty JS': ('puppeteerMetrics', 'JSHeapTotalSize')
+    }
+
+    # Metrics to plot
+    metrics_to_plot = {
+        'Czas załadowania zawartości DOM': {
+            'title': 'Porównanie czasu załadowania zawartości DOM',
+            'ylabel': 'Czas (ms)',
+            'legend_title': 'Warunek sieciowy'
+        },
+        'Czas ukończenia załadowania DOM': {
+            'title': 'Porównanie czasu ukończenia załadowania DOM',
+            'ylabel': 'Czas (ms)',
+            'legend_title': 'Warunek sieciowy'
+        },
+        'Czas przesłania formularza': {
+            'title': 'Porównanie czasu przesłania formularza',
+            'ylabel': 'Czas (ms)',
+            'legend_title': 'Warunek sieciowy'
+        },
+        'Czas renderowania największego fragmentu (LCP)': {
+            'title': 'Porównanie czasu renderowania największego fragmentu (LCP)',
+            'ylabel': 'Czas (ms)'
+        },
+        'Czas załadowania pierwszego znaczącego elementu': {
+            'title': 'Porównanie czasu załadowania pierwszego znaczącego elementu',
+            'ylabel': 'Czas (ms)'
+        },
+        'Czas do interaktywności': {
+            'title': 'Porównanie czasu do interaktywności',
+            'ylabel': 'Czas (ms)'
+        },
+        'Całkowity czas blokowania': {
+            'title': 'Porównanie całkowitego czasu blokowania',
+            'ylabel': 'Czas (ms)'
+        },
+        'Potencjalne maksymalne FID': {
+            'title': 'Porównanie potencjalnego maksymalnego FID',
+            'ylabel': 'Czas (ms)'
+        },
+        'Czas do pierwszego bajtu': {
+            'title': 'Porównanie czasu do pierwszego bajtu',
+            'ylabel': 'Czas (ms)'
+        },
+        'Łączna liczba żądań': {
+            'title': 'Porównanie łącznej liczby żądań',
+            'ylabel': 'Liczba',
+            'lower_is_better': False
+        },
+        'Łączny rozmiar transferu': {
+            'title': 'Porównanie łącznego rozmiaru transferu',
+            'ylabel': 'Rozmiar (bajty)',
+            'lower_is_better': False
+        },
+        'Przesunięcie układu (CLS)': {
+            'title': 'Porównanie przesunięcia układu (CLS)',
+            'ylabel': 'Wynik przesunięcia'
+        },
+        'Wykorzystany rozmiar sterty JS': {
+            'title': 'Porównanie wykorzystania sterty JS',
+            'ylabel': 'Rozmiar (bajty)',
+            'lower_is_better': False
+        },
+        'Całkowity rozmiar sterty JS': {
+            'title': 'Porównanie całkowitego rozmiaru sterty JS',
+            'ylabel': 'Rozmiar (bajty)',
+            'lower_is_better': False
+        }
+    }
+
     # Collecting custom metrics
-    df_custom = collect_custom_metrics(apps, conditions + ['no-throttling'])
-    df_cpu_custom = collect_custom_metrics(apps, cpu_conditions + ['no-throttling'])
+    df_custom = collect_metrics(apps, conditions + ['no-throttling'],
+                                '../../results/login/metrics/custom/{}_{}_metrics.json',
+                                custom_metrics_to_collect)
+    df_cpu_custom = collect_metrics(apps, cpu_conditions + ['no-throttling'],
+                                    '../../results/login/metrics/custom/{}_{}_metrics.json',
+                                    custom_metrics_to_collect)
 
     # Collecting Lighthouse metrics separately for network and CPU conditions
-    df_lighthouse_network = collect_lighthouse_metrics(apps, conditions + ['no-throttling'])
-    df_lighthouse_cpu = collect_lighthouse_metrics(apps, cpu_conditions + ['no-throttling'])
+    df_lighthouse_network = collect_metrics(apps, conditions + ['no-throttling'],
+                                            '../../results/login/metrics/lighthouse/{}_{}_lighthouse_metrics.json',
+                                            lighthouse_metrics_to_collect)
+    df_lighthouse_cpu = collect_metrics(apps, cpu_conditions + ['no-throttling'],
+                                        '../../results/login/metrics/lighthouse/{}_{}_lighthouse_metrics.json',
+                                        lighthouse_metrics_to_collect)
 
     # Collecting overall Lighthouse metrics from no-throttling files
-    df_overall_lighthouse = collect_overall_lighthouse_metrics(apps)
+    df_overall_lighthouse = collect_metrics(apps, ['no-throttling'],
+                                            '../../results/login/metrics/lighthouse/{}_{}_lighthouse_metrics.json',
+                                            overall_lighthouse_metrics_to_collect)
+
+    df_overall_puppeteer = collect_metrics(apps, ['no-throttling'],
+                                           '../../results/login/metrics/custom/{}_{}_metrics.json',
+                                           overall_puppeteer_metrics_to_collect)
+
+    # Merging overall metrics
+    df_overall = pd.merge(df_overall_lighthouse, df_overall_puppeteer, on=['Aplikacja', 'Warunek'])
 
     # Plotting custom metrics
-    plot_metric_comparison(df_custom, 'Czas załadowania zawartości DOM', 'Porównanie czasu załadowania zawartości DOM',
-                           'Czas (ms)',
-                           legend_title='Warunek sieciowy')
-    plot_metric_comparison(df_custom, 'Czas ukończenia załadowania DOM', 'Porównanie czasu ukończenia załadowania DOM',
-                           'Czas (ms)',
-                           legend_title='Warunek sieciowy')
-    plot_metric_comparison(df_custom, 'Czas przesłania formularza', 'Porównanie czasu przesłania formularza',
-                           'Czas (ms)',
-                           legend_title='Warunek sieciowy')
-    plot_metric_comparison(df_cpu_custom, 'Czas załadowania zawartości DOM',
-                           'Porównanie czasu załadowania zawartości DOM', 'Czas (ms)',
-                           legend_title='Warunek CPU')
-    plot_metric_comparison(df_cpu_custom, 'Czas ukończenia załadowania DOM',
-                           'Porównanie czasu ukończenia załadowania DOM', 'Czas (ms)',
-                           legend_title='Warunek CPU')
-    plot_metric_comparison(df_cpu_custom, 'Czas przesłania formularza', 'Porównanie czasu przesłania formularza',
-                           'Czas (ms)',
-                           legend_title='Warunek CPU')
+    plot_metrics(df_custom, {metric: details for metric, details in metrics_to_plot.items() if
+                             metric in custom_metrics_to_collect})
+    plot_metrics(df_cpu_custom, {metric: details for metric, details in metrics_to_plot.items() if
+                                 metric in custom_metrics_to_collect})
 
     # Plotting Lighthouse metrics separately for network and CPU conditions
-    plot_lighthouse_metrics(df_lighthouse_network)
-    plot_lighthouse_metrics(df_lighthouse_cpu)
+    plot_metrics(df_lighthouse_network, {metric: details for metric, details in metrics_to_plot.items() if
+                                         metric in lighthouse_metrics_to_collect})
+    plot_metrics(df_lighthouse_cpu, {metric: details for metric, details in metrics_to_plot.items() if
+                                     metric in lighthouse_metrics_to_collect})
 
-    # Plotting overall Lighthouse metrics
-    plot_overall_lighthouse_metrics(df_overall_lighthouse)
+    # Plotting overall Lighthouse and Puppeteer metrics
+    plot_metrics(df_overall, {metric: details for metric, details in metrics_to_plot.items() if
+                              metric in overall_lighthouse_metrics_to_collect or metric in overall_puppeteer_metrics_to_collect})
 
 
 def translate_condition(condition):
